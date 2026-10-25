@@ -37,7 +37,7 @@ func TestNewNamedExisting(t *testing.T) {
 	if err := os.WriteFile(namedPath, []byte("existing namespace"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ns, err := newNamed(dir, "existing")
+	ns, err := newNamed(namedPath)
 	if ns.IsOpen() {
 		ns.Close()
 		t.Error("failed creation returned an open namespace handle")
@@ -51,6 +51,38 @@ func TestNewNamedExisting(t *testing.T) {
 	}
 	if string(got) != "existing namespace" {
 		t.Fatalf("existing namespace file changed: %q", got)
+	}
+}
+
+func TestNewNamedExistingFallback(t *testing.T) {
+	dir := t.TempDir()
+	primaryDir := filepath.Join(dir, "primary")
+	fallbackDir := filepath.Join(dir, "fallback")
+	for _, d := range []string{primaryDir, fallbackDir} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	namedPath := filepath.Join(fallbackDir, "existing")
+	if err := os.WriteFile(namedPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both directories exist, but only the fallback directory contains the name.
+	resolvedPath := getNetnsPathForNameInDirs("existing", primaryDir, fallbackDir)
+	if resolvedPath != namedPath {
+		t.Fatalf("resolved path = %q; want %q", resolvedPath, namedPath)
+	}
+	ns, err := newNamed(resolvedPath)
+	if ns.IsOpen() {
+		ns.Close()
+		t.Error("failed creation returned an open namespace handle")
+	}
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("newNamed error = %v; want file exists", err)
+	}
+	if _, err := os.Stat(filepath.Join(primaryDir, "existing")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("duplicate primary namespace file: %v", err)
 	}
 }
 
