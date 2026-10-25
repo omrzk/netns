@@ -84,30 +84,35 @@ func New() (NsHandle, error) {
 // NewNamed creates a new named network namespace, sets it as current,
 // and returns a handle to it
 func NewNamed(name string) (NsHandle, error) {
-	// Determine which directory to use and ensure it exists
-	netnsDir := getNetnsPath()
-	if err := os.MkdirAll(netnsDir, 0o755); err != nil {
-		return None(), err
-	}
+	return newNamed(getNetnsPath(), name)
+}
 
-	newNs, err := New()
-	if err != nil {
+func newNamed(netnsDir, name string) (NsHandle, error) {
+	// Ensure the namespace directory exists.
+	if err := os.MkdirAll(netnsDir, 0o755); err != nil {
 		return None(), err
 	}
 
 	namedPath := path.Join(netnsDir, name)
 
+	// Reserve the name atomically before changing the calling thread's namespace.
 	f, err := os.OpenFile(namedPath, os.O_CREATE|os.O_EXCL, 0o444)
 	if err != nil {
-		newNs.Close()
 		return None(), err
 	}
 	f.Close()
+
+	newNs, err := New()
+	if err != nil {
+		_ = os.Remove(namedPath)
+		return None(), err
+	}
 
 	nsPath := fmt.Sprintf("/proc/%d/task/%d/ns/net", os.Getpid(), unix.Gettid())
 	err = unix.Mount(nsPath, namedPath, "bind", unix.MS_BIND, "")
 	if err != nil {
 		newNs.Close()
+		_ = os.Remove(namedPath)
 		return None(), err
 	}
 

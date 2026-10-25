@@ -1,10 +1,58 @@
 package netns
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
 )
+
+func TestNewNamedExisting(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	origns, err := Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer origns.Close()
+	defer func() {
+		current, err := Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer current.Close()
+		if !current.Equal(origns) {
+			if err := Set(origns); err != nil {
+				t.Fatalf("failed to restore namespace: %v", err)
+			}
+			t.Error("failed creation changed the calling thread's namespace")
+		}
+	}()
+
+	dir := t.TempDir()
+	namedPath := filepath.Join(dir, "existing")
+	if err := os.WriteFile(namedPath, []byte("existing namespace"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ns, err := newNamed(dir, "existing")
+	if ns.IsOpen() {
+		ns.Close()
+		t.Error("failed creation returned an open namespace handle")
+	}
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("newNamed error = %v; want file exists", err)
+	}
+	got, err := os.ReadFile(namedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "existing namespace" {
+		t.Fatalf("existing namespace file changed: %q", got)
+	}
+}
 
 func TestGetNewSetDelete(t *testing.T) {
 	runtime.LockOSThread()
